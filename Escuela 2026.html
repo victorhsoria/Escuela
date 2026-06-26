@@ -245,7 +245,7 @@
         <div class="card">
           <div class="card-head"><span class="card-title">Importar archivo</span></div>
           <div class="notice">La app intenta leer el PDF en el navegador. Si el navegador no permite la lectura o no hay internet para cargar el lector PDF, usá la opción “pegar texto” o cargá los temas manualmente.</div>
-          <div class="field" style="margin-top:14px"><label>Archivo RTF, TXT o PDF</label><input type="file" id="pdfFile" accept=".rtf,.txt,.pdf,application/rtf,text/rtf,text/plain,application/pdf"></div>
+          <div class="field" style="margin-top:14px"><label>Archivo RTF, TXT o PDF</label><input type="file" id="pdfFile" multiple accept=".rtf,.txt,.pdf,application/rtf,text/rtf,text/plain,application/pdf"></div>
           <button class="btn btn-primary" onclick="importPdf()">Leer archivo y crear semanas</button>
           <div id="pdfStatus" style="margin-top:12px;color:var(--muted);font-size:13px"></div>
         </div>
@@ -1185,8 +1185,12 @@ function createBlankWeek(){
   state.weeks=state.weeks.filter(x=>x.start!==start); state.weeks.push(w); saveState(); viewDate=parseISO(start); showPage('programa'); toast('Semana creada');
 }
 async function importPdf(){
-  const file=document.getElementById('pdfFile').files[0]; const status=document.getElementById('pdfStatus');
+  const files=[...document.getElementById('pdfFile').files]; const file=files[0]; const status=document.getElementById('pdfStatus');
   if(!file){toast('Seleccioná un archivo');return}
+  if(files.length>1){
+    await importTextLikeFiles(files,status);
+    return;
+  }
   const name=(file.name||'').toLowerCase();
   if(name.endsWith('.rtf') || name.endsWith('.txt')){
     await importTextLikeFile(file,status);
@@ -1225,6 +1229,31 @@ async function importTextLikeFile(file,status){
   status.textContent=`Listo: ${weeks.length} semana/s importadas desde ${file.name}.`;
   toast('Archivo importado');
 }
+async function importTextLikeFiles(files,status){
+  const invalid=files.filter(file=>!/(\.rtf|\.txt)$/i.test(file.name||''));
+  if(invalid.length){
+    toast('Para cargar varios archivos, usa solo RTF o TXT');
+    status.textContent='Selecciona varios archivos RTF/TXT o un solo PDF.';
+    return;
+  }
+  status.textContent='Leyendo archivos de texto...';
+  const chunks=[];
+  for(const file of files){
+    const raw=await file.text();
+    chunks.push(file.name.toLowerCase().endsWith('.rtf')?rtfToPlainText(raw):raw);
+  }
+  const text=chunks.join('\n\n');
+  document.getElementById('programText').value=text;
+  const weeks=parseWeeksFromText(text, Number(document.getElementById('pasteYear').value)||new Date().getFullYear(), `${files.length} archivos`);
+  if(!weeks.length){
+    status.textContent='Se leyeron los archivos, pero no se detectaron semanas. Revisa el texto pegado a la derecha.';
+    toast('No se detectaron semanas');
+    return;
+  }
+  mergeWeeks(weeks);
+  status.textContent=`Listo: ${weeks.length} semana/s importadas desde ${files.length} archivo/s.`;
+  toast('Archivos importados');
+}
 function rtfToPlainText(rtf){
   let text=String(rtf||'');
   text=text.replace(/HYPERLINK\s+"[^"]*"/gi,' ');
@@ -1240,6 +1269,7 @@ function rtfToPlainText(rtf){
   text=text.replace(/\\[^a-zA-Z0-9]/g,' ');
   text=text.replace(/HYPERLINK\s+"[^"]*"/gi,' ');
   text=text.replace(/https?:\/\/\S+/gi,' ');
+  text=stripMwbReferenceNoise(text);
   text=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{2,}/g,' ');
   return text.trim();
 }
@@ -1362,12 +1392,21 @@ function parseWeeksFromPages(pages,year,source){
 }
 function parseWeeksFromText(text,year,source){
   text=cleanText(text);
-  const markers=[...text.matchAll(weekMarkerRegex('gi'))];
+  const rawMarkers=[...text.matchAll(weekMarkerRegex('gi'))];
+  const markers=rawMarkers.filter((m,idx)=>isUsefulWeekMarker(text,m,rawMarkers[idx+1]));
   if(!markers.length) return [];
   return markers.map((m,idx)=>{
     const start=m.index; const end=idx<markers.length-1?markers[idx+1].index:text.length;
     return parseWeekBlock(text.slice(start,end),year,source);
   }).filter(Boolean);
+}
+function isUsefulWeekMarker(text,marker,nextMarker){
+  const end=nextMarker?nextMarker.index:text.length;
+  const probe=text.slice(marker.index,Math.min(end,marker.index+3000));
+  const hasMeetingSection=/TESOROS\s+DE\s+LA\s+BIBLIA|SEAMOS\s+MEJORES\s+MAESTROS|NUESTRA\s+VIDA\s+CRISTIANA/i.test(probe);
+  const hasTimedPart=/(?:^|\n)\s*\d{1,2}\.\s+[\s\S]{0,220}\(\d+\s*(?:mins?\.?|minutos?)\s*\)/i.test(probe);
+  const hasSong=/Canci[oÃ³]n\s+\d+\s+y\s+oraci[oÃ³]n/i.test(probe);
+  return hasMeetingSection || (hasSong && hasTimedPart);
 }
 function cleanText(t){return (t||'').replace(/[\u0000-\u001f]/g,'\n').replace(/[‐‑‒–—]/g,'-').replace(/[ \t]+/g,' ').replace(/\n{2,}/g,'\n').replace(/ -/g,'-').trim()}
 function cleanText(t){return (t||'').replace(/[\u0000-\u001f]/g,'\n').replace(/[\u2010-\u2015]/g,'-').replace(/[ \t]+/g,' ').replace(/\n{2,}/g,'\n').replace(/ -/g,'-').trim()}
@@ -1376,6 +1415,7 @@ function sanitizeMwbPdfText(value){
   let t=String(value||'');
   t=t.replace(/HYPERLINK\s+"[^"]*"/gi,' ');
   t=t.replace(/https?:\/\/\S+/gi,' ');
+  t=stripMwbReferenceNoise(t);
   t=t.replace(/\(cid:\d+\)/g,' ');
   t=t.replace(/\/[A-Z]{2,}/g,' ');
   t=t.replace(/[\u00b4`]/g,'').replace(/\u0131/g,'i').replace(/\u02dc/g,'');
@@ -1392,6 +1432,19 @@ function sanitizeMwbPdfText(value){
   t=t.replace(new RegExp(`(\\d{1,2})\\s*-\\s*(\\d{1,2})\\s+DE\\s+(${months})`,'gi'),'$1-$2 DE $3');
   return t;
 }
+function stripMwbReferenceNoise(value){
+  let t=String(value||'');
+  const blocks=[
+    ['Texto insertado','Fin de texto insertado'],
+    ['Informaci[oóÃ³]n de la imagen','Fin de informaci[oóÃ³]n de la imagen'],
+    ['Referencia insertada','Fin de referencia insertada']
+  ];
+  blocks.forEach(([start,end])=>{
+    t=t.replace(new RegExp(`\\[${start}\\.?\\][\\s\\S]*?\\[${end}\\.?\\]`,'gi'),' ');
+  });
+  t=t.replace(/\[(?:Fin de )?(?:texto insertado|referencia insertada|informaci[oóÃ³]n de la imagen)\.?\]/gi,' ');
+  return t;
+}
 function weekMarkerRegex(flags='i'){return new RegExp('(\\d{1,2})\\s*(?:-|al|a)\\s*(\\d{1,2})\\s+de\\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\\s*([^\\n]{0,120})?',flags)}
 function monthIndexFromName(name){
   const key=normalizePlainText(name||'').toUpperCase();
@@ -1404,18 +1457,19 @@ function parseWeekBlock(block,year,source){
   const sm=monthIndexFromName(m[3]), startDay=Number(m[1]), endDay=Number(m[2]);
   if(sm==null) return null;
   const start=new Date(year,sm,startDay); let endMonth=sm; if(endDay<startDay) endMonth=sm+1; const end=new Date(year,endMonth,endDay);
-  const lectura=(m[4]||'').split('\n')[0].replace(/Canci[oó]n.*/i,'').trim();
+  const lectura=(m[4]||'').split('\n')[0].replace(/Canci[oó]n.*/i,'').replace(/^\s*\((.*?)\)\s*$/,'$1').trim();
   const parts=[];
   const blockParts=block.replace(/\s+(\d{1,2})\.\s+/g,'\n$1. ');
   const matches=[...blockParts.matchAll(/(?:^|\n)\s*(\d{1,2})\.\s+([\s\S]*?)(?=\n\s*\d{1,2}\.\s+|$)/g)];
   matches.forEach(mm=>{
     const num=Number(mm[1]); let raw=mm[2].replace(/\n/g,' ').replace(/\s+/g,' ').trim();
     if(!raw || raw.length<3) return;
-    const time=(raw.match(/\((\d+)\s*(?:mins?\.?|minutos?)\)/i)||[])[0]||'';
+    const time=((raw.match(/\((\d+)\s*(?:mins?\.?|minutos?)\s*\)/i)||[])[0]||'').replace(/\s+\)/,')');
     if(!time) return;
-    let title=raw.replace(/\(.+?mins?\.?\)/i,'').split(/(?:DE CASA|PREDICACIÓN|Análisis|Escenificación|lff|lfb|Is |Jer |Ponga|Lea)/)[0].trim();
+    const titleSource=(raw.split(/\(\d+\s*(?:mins?\.?|minutos?)\s*\)/i)[0]||raw).trim();
+    let title=titleSource.split(/(?:DE CASA|PREDICACIÓN|Análisis|Escenificación|lff|lfb|Is |Jer |Ponga|Lea)/)[0].trim();
     if(title.length>90) title=title.slice(0,90).replace(/\s+\S*$/,'')+'…';
-    title=title.replace(/\(\d+\s*(?:mins?\.?|minutos?)\)/i,'').trim();
+    title=title.replace(/\(\d+\s*(?:mins?\.?|minutos?)\s*\)/i,'').trim();
     const section=num<=3?'tesoros':(num<=7?'smm':'nvc');
     const priv= num===1?'tesoros':num===2?'perlas':num===3?'lector_biblia':section==='smm'?'smm':raw.toLowerCase().includes('estudio bíblico')?'conductor_ebc':'nvc';
     parts.push({id:'part-'+num+'-'+Date.now()+Math.random().toString(36).slice(2,6),num,section,title:title||`Parte ${num}`,time,detail:raw.slice(0,220),privReq:priv,helperAllowed:defaultHelperAllowed({section,num,title,detail:raw}),assignedId:null,helperId:null,readerId:null,done:false,attendance:'pendiente',notes:''});
