@@ -1,0 +1,7 @@
+.agents/
+.codex/
+*.pdf
+*.tmp
+*.bak
+Thumbs.db
+desktop.ini
