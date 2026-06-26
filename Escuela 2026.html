@@ -1227,6 +1227,7 @@ async function importTextLikeFile(file,status){
 }
 function rtfToPlainText(rtf){
   let text=String(rtf||'');
+  text=text.replace(/HYPERLINK\s+"[^"]*"/gi,' ');
   text=text.replace(/\\par[d]?/g,'\n').replace(/\\line/g,'\n').replace(/\\tab/g,' ');
   text=text.replace(/\\u(-?\d+)\??/g,(_,n)=>{
     let code=Number(n);
@@ -1237,6 +1238,8 @@ function rtfToPlainText(rtf){
   text=text.replace(/[{}]/g,' ');
   text=text.replace(/\\[a-zA-Z]+-?\d* ?/g,' ');
   text=text.replace(/\\[^a-zA-Z0-9]/g,' ');
+  text=text.replace(/HYPERLINK\s+"[^"]*"/gi,' ');
+  text=text.replace(/https?:\/\/\S+/gi,' ');
   text=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{2,}/g,' ');
   return text.trim();
 }
@@ -1371,6 +1374,8 @@ function cleanText(t){return (t||'').replace(/[\u0000-\u001f]/g,'\n').replace(/[
 function cleanText(t){return sanitizeMwbPdfText(t).replace(/[\u0000-\u001f]/g,'\n').replace(/[\u2010-\u2015]/g,'-').replace(/[ \t]+/g,' ').replace(/\n{2,}/g,'\n').replace(/ -/g,'-').trim()}
 function sanitizeMwbPdfText(value){
   let t=String(value||'');
+  t=t.replace(/HYPERLINK\s+"[^"]*"/gi,' ');
+  t=t.replace(/https?:\/\/\S+/gi,' ');
   t=t.replace(/\(cid:\d+\)/g,' ');
   t=t.replace(/\/[A-Z]{2,}/g,' ');
   t=t.replace(/[\u00b4`]/g,'').replace(/\u0131/g,'i').replace(/\u02dc/g,'');
@@ -1406,9 +1411,11 @@ function parseWeekBlock(block,year,source){
   matches.forEach(mm=>{
     const num=Number(mm[1]); let raw=mm[2].replace(/\n/g,' ').replace(/\s+/g,' ').trim();
     if(!raw || raw.length<3) return;
-    const time=(raw.match(/\((\d+)\s*mins?\.?\)/i)||[])[0]||'';
+    const time=(raw.match(/\((\d+)\s*(?:mins?\.?|minutos?)\)/i)||[])[0]||'';
+    if(!time) return;
     let title=raw.replace(/\(.+?mins?\.?\)/i,'').split(/(?:DE CASA|PREDICACIÓN|Análisis|Escenificación|lff|lfb|Is |Jer |Ponga|Lea)/)[0].trim();
     if(title.length>90) title=title.slice(0,90).replace(/\s+\S*$/,'')+'…';
+    title=title.replace(/\(\d+\s*(?:mins?\.?|minutos?)\)/i,'').trim();
     const section=num<=3?'tesoros':(num<=7?'smm':'nvc');
     const priv= num===1?'tesoros':num===2?'perlas':num===3?'lector_biblia':section==='smm'?'smm':raw.toLowerCase().includes('estudio bíblico')?'conductor_ebc':'nvc';
     parts.push({id:'part-'+num+'-'+Date.now()+Math.random().toString(36).slice(2,6),num,section,title:title||`Parte ${num}`,time,detail:raw.slice(0,220),privReq:priv,helperAllowed:defaultHelperAllowed({section,num,title,detail:raw}),assignedId:null,helperId:null,readerId:null,done:false,attendance:'pendiente',notes:''});
