@@ -1470,11 +1470,26 @@ function parseWeekBlock(block,year,source){
     let title=titleSource.split(/(?:DE CASA|PREDICACIÓN|Análisis|Escenificación|lff|lfb|Is |Jer |Ponga|Lea)/)[0].trim();
     if(title.length>90) title=title.slice(0,90).replace(/\s+\S*$/,'')+'…';
     title=title.replace(/\(\d+\s*(?:mins?\.?|minutos?)\s*\)/i,'').trim();
-    const section=num<=3?'tesoros':(num<=7?'smm':'nvc');
+    const section=detectImportedPartSection(blockParts,mm.index,num);
     const priv= num===1?'tesoros':num===2?'perlas':num===3?'lector_biblia':section==='smm'?'smm':raw.toLowerCase().includes('estudio bíblico')?'conductor_ebc':'nvc';
     parts.push({id:'part-'+num+'-'+Date.now()+Math.random().toString(36).slice(2,6),num,section,title:title||`Parte ${num}`,time,detail:raw.slice(0,220),privReq:priv,helperAllowed:defaultHelperAllowed({section,num,title,detail:raw}),assignedId:null,helperId:null,readerId:null,done:false,attendance:'pendiente',notes:''});
   });
   return {id:'wk-'+iso(start),start:iso(start),end:iso(end),lectura,openingSong:(block.match(/Canción\s+(\d+)\s+y oración/i)||[])[1]||'',nvcSong:'',closingSong:'',openingPrayerId:null,presidentId:null,closingPrayerId:null,source,parts:parts.length?parts:[]};
+}
+function detectImportedPartSection(text,index,num){
+  const before=text.slice(0,index);
+  const headers=[
+    {section:'tesoros',index:lastIndexOfRegex(before,/Tesoros\s+de\s+la\s+Biblia/gi)},
+    {section:'smm',index:lastIndexOfRegex(before,/Seamos\s+mejores\s+maestros/gi)},
+    {section:'nvc',index:lastIndexOfRegex(before,/Nuestra\s+Vida\s+Cristiana/gi)}
+  ].filter(x=>x.index>=0).sort((a,b)=>b.index-a.index);
+  if(headers[0]) return headers[0].section;
+  return num<=3?'tesoros':(num<=6?'smm':'nvc');
+}
+function lastIndexOfRegex(text,regex){
+  let last=-1, match;
+  while((match=regex.exec(text))!==null) last=match.index;
+  return last;
 }
 function dedupeWeeks(arr){const map={}; arr.forEach(w=>map[w.start]=w); return Object.values(map)}
 function renderReports(){
