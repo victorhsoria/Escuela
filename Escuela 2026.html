@@ -562,6 +562,7 @@ function normalizeWeek(w){
   if(!('closingSong' in w)) w.closingSong='';
   if(!Array.isArray(w.parts)) w.parts=[];
   w.parts.forEach(part=>{
+    normalizeImportedSection(part);
     if(!('helperAllowed' in part)) part.helperAllowed=defaultHelperAllowed(part);
     if(isSmmDiscoursePart(part)){part.helperAllowed=false; part.helperId=null}
     if(isExplainBeliefsPart(part)) part.helperAllowed=true;
@@ -572,6 +573,18 @@ function normalizeWeek(w){
     if(!('attendance' in part)) part.attendance='pendiente';
     if(!('notes' in part)) part.notes='';
   });
+}
+function normalizeImportedSection(part){
+  if(!part || part.section!=='smm' || Number(part.num)<7) return;
+  if(looksLikeSmmImportedPart(part)) return;
+  part.section='nvc';
+  if(part.privReq==='smm') part.privReq=isEbcPart(part)?'conductor_ebc':'nvc';
+  part.helperAllowed=false;
+  part.helperId=null;
+}
+function looksLikeSmmImportedPart(part){
+  const text=normalizePlainText(`${part.title||''} ${part.detail||''}`);
+  return /empiece conversaciones|haga revisitas|explique sus creencias|curso biblico|hacer discipulos|predicacion|de casa en casa|discurso|seamos mejores|lectores y maestros/.test(text);
 }
 function rolePart(w,kind){
   const map={
